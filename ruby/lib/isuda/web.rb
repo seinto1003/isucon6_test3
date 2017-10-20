@@ -9,6 +9,8 @@ require 'mysql2-cs-bind'
 require 'rack/utils'
 require 'sinatra/base'
 require 'tilt/erubis'
+# add redis
+require 'redis'
 
 module Isuda
   class Web < ::Sinatra::Base
@@ -134,9 +136,11 @@ module Isuda
 
       content_type :json
       JSON.generate(result: 'ok')
+      # redis initialize add
     end
 
     get '/', set_name: true do
+      redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
       per_page = 10
       page = (params[:page] || 1).to_i
 
@@ -147,7 +151,13 @@ module Isuda
         OFFSET #{per_page * (page - 1)}
       |)
       entries.each do |entry|
-        entry[:html] = htmlify(entry[:description])
+	if redis.exists entry[:description] then
+          entry[:html] = redis.get entry[:description]
+	else 
+          redis.set entry[:description], htmlify(entry[:description])
+          entry[:html] = htmlify(entry[:description])
+	end
+#        entry[:html] = htmlify(entry[:description])
         entry[:stars] = load_stars(entry[:keyword])
       end
 
@@ -248,7 +258,11 @@ module Isuda
       end
 
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
-
+      #redisのパージを実行
+      redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
+      if redis.exists keyword then
+	      redis.del keyword
+      end
       redirect_found '/'
     end
   end
