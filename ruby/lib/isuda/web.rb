@@ -220,6 +220,7 @@ module Isuda
     end
 
     post '/keyword', set_name: true, authenticate: true do
+      redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
       keyword = params[:keyword] || ''
       halt(400) if keyword == ''
       description = params[:description]
@@ -233,15 +234,27 @@ module Isuda
         author_id = ?, keyword = ?, description = ?, updated_at = NOW()
       |, *bound)
 
+      ## redis cache add 2
+      if redis.exists params[:description] then
+         redis.del params[:description]
+      end
+      redis.set params[:description], htmlify(params[:description])
+
       redirect_found '/'
     end
 
     get '/keyword/:keyword', set_name: true do
+      redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
+
       keyword = params[:keyword] or halt(400)
 
       entry = db.xquery(%| select * from entry where keyword = ? |, keyword).first or halt(404)
       entry[:stars] = load_stars(entry[:keyword])
-      entry[:html] = htmlify(entry[:description])
+      if redis.exists entry[:description] then
+         entry[:html] = redis.get entry[:description]
+      else 
+         entry[:html] = htmlify(entry[:description])
+      end
 
       locals = {
         entry: entry,
@@ -256,12 +269,13 @@ module Isuda
       unless db.xquery(%| SELECT * FROM entry WHERE keyword = ? |, keyword).first
         halt(404)
       end
-
+      
+      des = db.xquery(%| SELECT description FROM entry WHERE keyword = ?|,keyword).first
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
-      if redis.exists keyword then
-	      redis.del keyword
+      if redis.exists des then
+	      redis.del des 
       end
       redirect_found '/'
     end
