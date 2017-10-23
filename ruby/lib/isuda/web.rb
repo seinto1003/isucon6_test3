@@ -11,13 +11,13 @@ require 'sinatra/base'
 require 'tilt/erubis'
 # add redis
 require 'redis'
-require 'rack-lineprof'
+#require 'rack-lineprof'
 
 # redisコネクション作
 
 module Isuda
   class Web < ::Sinatra::Base
-    use Rack::Lineprof
+#    use Rack::Lineprof
     enable :protection
     enable :sessions
 
@@ -274,11 +274,13 @@ module Isuda
         author_id = ?, keyword = ?, description = ?, updated_at = NOW()
       |, *bound)
 
+
+      entry = db.xquery(%| select id from entry where keyword = ?|,params[:keyword]).first
       ## redis cache add 2
-      if redis.exists params[:description] then
-         redis.del params[:description]
+      if redis.exists "content#{entry[:id]}" then
+         redis.del "content#{[:id]}"
       end
-      redis.set params[:description], htmlify(params[:description])
+      redis.set  "content#{[:id]}", htmlify(params[:description])
 
       redirect_found '/'
     end
@@ -290,8 +292,8 @@ module Isuda
 
       entry = db.xquery(%| select * from entry where keyword = ? |, keyword).first or halt(404)
       entry[:stars] = load_stars(entry[:keyword])
-      if redis.exists entry[:description] then
-         entry[:html] = redis.get entry[:description]
+      if redis.exists "content#{entry[:id]}" then
+         entry[:html] = redis.get "content#{entry[:id]}"
       else 
          entry[:html] = htmlify(entry[:description])
       end
@@ -306,7 +308,7 @@ module Isuda
       keyword = params[:keyword] or halt(400)
       is_delete = params[:delete] or halt(400)
 
-      unless db.xquery(%| SELECT * FROM entry WHERE keyword = ? |, keyword).first
+      unless entry = db.xquery(%| SELECT * FROM entry WHERE keyword = ? |, keyword).first
         halt(404)
       end
       
@@ -314,8 +316,8 @@ module Isuda
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
-      if redis.exists des then
-	     redis.del des 
+      if redis.exists "content#{entry[:id]}" then
+	     redis.del "content#{entry[:id]}"
       end
       redirect_found '/'
     end
