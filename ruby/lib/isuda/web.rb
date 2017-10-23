@@ -11,13 +11,13 @@ require 'sinatra/base'
 require 'tilt/erubis'
 # add redis
 require 'redis'
-#require 'rack-lineprof'
+require 'rack-lineprof'
 
 # redisコネクション作
 
 module Isuda
   class Web < ::Sinatra::Base
-#    use Rack::Lineprof
+    use Rack::Lineprof
     enable :protection
     enable :sessions
 
@@ -97,13 +97,13 @@ module Isuda
 
       def htmlify(content)
         redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
-        keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
-        pattern = keywords.map {|k| 
-            if   redis.exists k[:keyword] then 
-                 redis.get k[:keyword] 
-            else redis.set k[:keyword],Regexp.escape(k[:keyword]) 
-                 redis.get k[:keyword] 
-            end }.join('|')
+        if redis.exists "patern" then
+           pattern = redis.get "patern"
+        else 
+           keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
+           pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
+           redis.set "patern", pattern
+        end
         kw2hash = {}
         hashed_content = content.gsub(/(#{pattern})/) {|m|
           matched_keyword = $1
@@ -120,23 +120,23 @@ module Isuda
         }
         escaped_content = Rack::Utils.escape_html(hashed_content)
         kw2hash.each do |(keyword, hash)|
-            if redis.exists "url#{hash}"
-               keyword_url = redis.get "url#{hash}"
-            else 
-               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-               redis.set "url#{hash}",keyword_url
-            end 
-            if redis .exists "anchor#{hash}"
-               anchor = redis.get "anchor#{hash}" 
-            else
-                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-                redis.set "anchor#{hash}",anchor
-            end
-            escaped_content.gsub!(hash, anchor)
+#            if redis.exists "url#{hash}"
+#               keyword_url = redis.get "url#{hash}"
+#            else 
+#               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+#               redis.set "url#{hash}",keyword_url
+#            end 
+#            if redis .exists "anchor#{hash}"
+#               anchor = redis.get "anchor#{hash}" 
+#            else
+#                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+#                redis.set "anchor#{hash}",anchor
+#            end
+#            escaped_content.gsub!(hash, anchor)
 
-#          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-#          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-#          escaped_content.gsub!(hash, anchor)
+          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+          escaped_content.gsub!(hash, anchor)
         end
         escaped_content.gsub(/\n/, "<br />\n")
       end
@@ -274,12 +274,14 @@ module Isuda
         author_id = ?, keyword = ?, description = ?, updated_at = NOW()
       |, *bound)
 
-
+      redis.del "patern"
       entry = db.xquery(%| select id from entry where keyword = ?|,params[:keyword]).first
       ## redis cache add 2
       if redis.exists "content#{entry[:id]}" then
          redis.del "content#{entry[:id]}"
       end
+      redis.set "hash#{keyword}", "isuda_#{Digest::SHA1.hexdigest(keyword)}"
+      redis.set keyword ,Regexp.escape(keyword)
       redis.set  "content#{entry[:id]}", htmlify(params[:description])
 
       redirect_found '/'
@@ -315,8 +317,10 @@ module Isuda
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
+      redis.del "patern"
       if redis.exists "content#{entry[:id]}" then
 	     redis.del "content#{entry[:id]}"
+         redis.del "patern"
       end
       redirect_found '/'
     end
