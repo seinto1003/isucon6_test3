@@ -273,17 +273,24 @@ module Isuda
         ON DUPLICATE KEY UPDATE
         author_id = ?, keyword = ?, description = ?, updated_at = NOW()
       |, *bound)
+      
 
-      redis.del "patern"
       entry = db.xquery(%| select id from entry where keyword = ?|,params[:keyword]).first
       ## redis cache add 2
       if redis.exists "content#{entry[:id]}" then
          redis.del "content#{entry[:id]}"
-      end
-      redis.set "hash#{keyword}", "isuda_#{Digest::SHA1.hexdigest(keyword)}"
-      redis.set keyword ,Regexp.escape(keyword)
-      redis.set  "content#{entry[:id]}", htmlify(params[:description])
+      end      
 
+      redis.set "hash#{keyword}", "isuda_#{Digest::SHA1.hexdigest(keyword)}"
+      keyword_escape = Regexp.escape(keyword)
+      redis.set keyword , keyword_escape
+      redis.set  "content#{entry[:id]}", htmlify(params[:description])
+      if redis.exists "patern" then
+         p = redis.get "patern"
+         patern_new = p + "|" + keyword_escape
+         redis.del "patern"
+         redis.set "patern", patern_new
+      end
       redirect_found '/'
     end
 
