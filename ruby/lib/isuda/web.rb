@@ -278,9 +278,9 @@ module Isuda
       entry = db.xquery(%| select id from entry where keyword = ?|,params[:keyword]).first
       ## redis cache add 2
       if redis.exists "content#{entry[:id]}" then
-         redis.del "content#{[:id]}"
+         redis.del "content#{entry[:id]}"
       end
-      redis.set  "content#{[:id]}", htmlify(params[:description])
+      redis.set  "content#{entry[:id]}", htmlify(params[:description])
 
       redirect_found '/'
     end
