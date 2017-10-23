@@ -11,9 +11,13 @@ require 'sinatra/base'
 require 'tilt/erubis'
 # add redis
 require 'redis'
+require 'rack-lineprof'
+
+# redisコネクション作
 
 module Isuda
   class Web < ::Sinatra::Base
+    use Rack::Lineprof
     enable :protection
     enable :sessions
 
@@ -92,20 +96,47 @@ module Isuda
       end
 
       def htmlify(content)
-        keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
-        pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
+        redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
+        keywords = db.xquery(%| select id,keyword from entry order by character_length(keyword) desc |)
+        pattern = keywords.map {|k| 
+            if   redis.exists "keyw#{k[:id]}" then 
+                 redis.get "keyw#{k[:id]}" 
+            else redis.set "keyw#{k[:id]}",Regexp.escape(k[:keyword]) 
+                 redis.get "keyw#{k[:id]}" 
+            end }.join('|')
         kw2hash = {}
         hashed_content = content.gsub(/(#{pattern})/) {|m|
           matched_keyword = $1
-          "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}".tap do |hash|
-            kw2hash[matched_keyword] = hash
+          if redis.exists "hash#{matched_keyword}" then
+              hash = redis.get "hash#{matched_keyword}"
+          else 
+              redis.set "hash#{matched_keyword}", "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}"
+              hash = redis.get "hash#{matched_keyword}"
           end
+          kw2hash[matched_keyword] = hash
+#          "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}".tap do |hash|
+#            kw2hash[matched_keyword] = hash
+#          end
         }
         escaped_content = Rack::Utils.escape_html(hashed_content)
         kw2hash.each do |(keyword, hash)|
-          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-          escaped_content.gsub!(hash, anchor)
+            if redis.exists "url#{hash}"
+               keyword_url = redis.get "url#{hash}"
+            else 
+               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+               redis.set "url#{hash}",keyword_url
+            end 
+            if redis .exists "anchor#{hash}"
+               anchor = redis.get "anchor#{hash}" 
+            else
+                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+                redis.set "anchor#{hash}",anchor
+            end
+            escaped_content.gsub!(hash, anchor)
+
+#          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+#          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+#          escaped_content.gsub!(hash, anchor)
         end
         escaped_content.gsub(/\n/, "<br />\n")
       end
@@ -151,13 +182,22 @@ module Isuda
         OFFSET #{per_page * (page - 1)}
       |)
       entries.each do |entry|
-	if redis.exists entry[:description] then
-          entry[:html] = redis.get entry[:description]
-	else 
-          redis.set entry[:description], htmlify(entry[:description])
-          entry[:html] = htmlify(entry[:description])
-	end
+        if redis.exists "content#{entry[:id]}" then
+           entry[:html] = redis.get "content#{entry[:id]}"
+        else 
+          redis.set "content#{entry[:id]}", htmlify(entry[:description])
+          entry[:html] = redis.get  "content#{entry[:id]}"
+        end
 #        entry[:html] = htmlify(entry[:description])
+
+#      if redis.exists entry[:description] then
+#         entry[:html] = redis.get entry[:description]
+#      else 
+#          redis.set entry[:description], htmlify(entry[:description])
+#          entry[:html] = redis.get entry[:description] 
+#      end
+#        entry[:html] = htmlify(entry[:description])
+
         entry[:stars] = load_stars(entry[:keyword])
       end
 
@@ -275,7 +315,7 @@ module Isuda
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
       if redis.exists des then
-	      redis.del des 
+	     redis.del des 
       end
       redirect_found '/'
     end
