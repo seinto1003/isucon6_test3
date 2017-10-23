@@ -182,13 +182,13 @@ module Isuda
         OFFSET #{per_page * (page - 1)}
       |)
       entries.each do |entry|
-        if redis.exists "content#{entry[:id]}" then
-           entry[:html] = redis.get "content#{entry[:id]}"
-        else 
-          redis.set "content#{entry[:id]}", htmlify(entry[:description])
-          entry[:html] = redis.get  "content#{entry[:id]}"
-        end
-#        entry[:html] = htmlify(entry[:description])
+#        if redis.exists "content#{entry[:id]}" then
+#           entry[:html] = redis.get "content#{entry[:id]}"
+#        else 
+#          redis.set "content#{entry[:id]}", htmlify(entry[:description])
+#          entry[:html] = redis.get  "content#{entry[:id]}"
+#        end
+       entry[:html] = htmlify(entry[:description])
 
 #      if redis.exists entry[:description] then
 #         entry[:html] = redis.get entry[:description]
@@ -277,14 +277,14 @@ module Isuda
 
       entry = db.xquery(%| select id from entry where keyword = ?|,params[:keyword]).first
       ## redis cache add 2
-      if redis.exists "content#{entry[:id]}" then
-         redis.del "content#{entry[:id]}"
-      end      
+#      if redis.exists "content#{entry[:id]}" then
+#         redis.del "content#{entry[:id]}"
+#      end      
 
       redis.set "hash#{keyword}", "isuda_#{Digest::SHA1.hexdigest(keyword)}"
       keyword_escape = Regexp.escape(keyword)
       redis.set keyword , keyword_escape
-      redis.set  "content#{entry[:id]}", htmlify(params[:description])
+#      redis.set  "content#{entry[:id]}", htmlify(params[:description])
       if redis.exists "patern" then
          p = redis.get "patern"
          patern_new = p + "|" + keyword_escape
@@ -301,11 +301,11 @@ module Isuda
 
       entry = db.xquery(%| select * from entry where keyword = ? |, keyword).first or halt(404)
       entry[:stars] = load_stars(entry[:keyword])
-      if redis.exists "content#{entry[:id]}" then
-         entry[:html] = redis.get "content#{entry[:id]}"
-      else 
-         entry[:html] = htmlify(entry[:description])
-      end
+#      if redis.exists "content#{entry[:id]}" then
+#         entry[:html] = redis.get "content#{entry[:id]}"
+#      else 
+      entry[:html] = htmlify(entry[:description])
+#      end
 
       locals = {
         entry: entry,
@@ -325,10 +325,10 @@ module Isuda
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
       redis.del "patern"
-      if redis.exists "content#{entry[:id]}" then
-	     redis.del "content#{entry[:id]}"
-         redis.del "patern"
-      end
+#      if redis.exists "content#{entry[:id]}" then
+#         redis.del "content#{entry[:id]}"
+#         redis.del "patern"
+#      end
       redirect_found '/'
     end
   end
