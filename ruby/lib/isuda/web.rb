@@ -97,12 +97,12 @@ module Isuda
 
       def htmlify(content)
         redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
-        keywords = db.xquery(%| select id,keyword from entry order by character_length(keyword) desc |)
+        keywords = db.xquery(%| select keyword from entry order by character_length(keyword) desc |)
         pattern = keywords.map {|k| 
-            if   redis.exists "keyw#{k[:id]}" then 
-                 redis.get "keyw#{k[:id]}" 
-            else redis.set "keyw#{k[:id]}",Regexp.escape(k[:keyword]) 
-                 redis.get "keyw#{k[:id]}" 
+            if   redis.exists k[:keyword] then 
+                 redis.get k[:keyword] 
+            else redis.set k[:keyword],Regexp.escape(k[:keyword]) 
+                 redis.get k[:keyword] 
             end }.join('|')
         kw2hash = {}
         hashed_content = content.gsub(/(#{pattern})/) {|m|
@@ -312,7 +312,6 @@ module Isuda
         halt(404)
       end
       
-      des = db.xquery(%| SELECT description FROM entry WHERE keyword = ?|,keyword).first
       db.xquery(%| DELETE FROM entry WHERE keyword = ? |, keyword)
       #redisのパージを実行
       redis = Redis.new(:host=>"127.0.0.1",:port=>6379)
