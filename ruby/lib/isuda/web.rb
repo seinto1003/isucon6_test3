@@ -12,13 +12,13 @@ require 'tilt/erubis'
 # add redis
 require 'redis'
 require 'hiredis'
-require 'rack-lineprof'
+#require 'rack-lineprof'
 
 # redisコネクション作
 
 module Isuda
   class Web < ::Sinatra::Base
-    use Rack::Lineprof
+#    use Rack::Lineprof
     enable :protection
     enable :sessions
 
@@ -29,13 +29,7 @@ module Isuda
     set :dsn, ENV['ISUDA_DSN'] || 'dbi:mysql:db=isuda'
     set :session_secret, 'tonymoris'
     set :isupam_origin, ENV['ISUPAM_ORIGIN'] || 'http://localhost:5050'
-    set :isutar_origin, ENV['ISUTAR_ORIGIN'] || 'http://localhost:5000'
-
-# isutrar_setting add
-    set :db_user1, ENV['ISUTAR_DB_USER'] || 'root'
-    set :db_password1, ENV['ISUTAR_DB_PASSWORD'] || ''
-    set :dsn1, ENV['ISUTAR_DSN'] || 'dbi:mysql:db1=isutar'
-    set :isuda_origin, ENV['ISUDA_ORIGIN'] || 'http://localhost:5000'
+    set :isutar_origin, ENV['ISUTAR_ORIGIN'] || 'http://localhost:5001'
 
     configure :development do
       require 'sinatra/reloader'
@@ -79,24 +73,6 @@ module Isuda
           end
       end
 
-## isutar db setting
-      def db1
-        Thread.current[:db1] ||=
-          begin
-            _, _, attrs_part1 = settings.dsn1.split(':', 3)
-            attrs1 = Hash[attrs_part1.split(';').map {|part| part.split('=', 2) }]
-            mysql1 = Mysql2::Client.new(
-              username: settings.db_user1,
-              password: settings.db_password1,
-              database: attrs1['db1'],
-              encoding: 'utf8mb4',
-              init_command: %|SET SESSION sql_mode='TRADITIONAL,NO_AUTO_VALUE_ON_ZERO,ONLY_FULL_GROUP_BY'|,
-            )
-            mysql1.query_options.update(symbolize_keys: true)
-            mysql1
-          end
-      end
-
       def register(name, pw)
         chars = [*'A'..'~']
         salt = 1.upto(20).map { chars.sample }.join('')
@@ -129,8 +105,7 @@ module Isuda
            pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
            redis.set "patern", pattern
         end
-#        kw2hash = {}
-#        escaped_content = Rack::Utils.escape_html(content)
+        kw2hash = {}
         hashed_content = content.gsub(/(#{pattern})/) {|m|
           matched_keyword = $1
           if redis.exists "hash#{matched_keyword}" then
@@ -139,46 +114,32 @@ module Isuda
               redis.set "hash#{matched_keyword}", "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}"
               hash = redis.get "hash#{matched_keyword}"
           end
-          if redis.exists "url#{matched_keyword}"
-             keyword_url = redis.get "url#{matched_keyword}"
-          else 
-             keyword_url =url("/keyword/#{Rack::Utils.escape_path(matched_keyword)}")
-             redis.set "url#{matched_keyword}",keyword_url
-          end 
-          if redis .exists "anchor#{matched_keyword}"
-             anchor = redis.get "anchor#{matched_keyword}" 
-          else
-             anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(matched_keyword)]
-             redis.set "anchor#{matched_keyword}",anchor
-          end
-          anchor
-#          kw2hash[matched_keyword] = hash
+          kw2hash[matched_keyword] = hash
 #          "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}".tap do |hash|
 #            kw2hash[matched_keyword] = hash
 #          end
         }
-#        escaped_content = Rack::Utils.escape_html(hashed_content)
-#        kw2hash.each do |(keyword, hash)|
-#            if redis.exists "url#{keyword}"
-#               keyword_url = redis.get "url#{keyword}"
-#            else 
-#               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-#               redis.set "url#{keyword}",keyword_url
-#            end 
-#            if redis .exists "anchor#{keyword}"
-#               anchor = redis.get "anchor#{keyword}" 
-#            else
-#                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-#                redis.set "anchor#{keyword}",anchor
-#            end
-#            escaped_content.gsub!(hash, anchor)
+        escaped_content = Rack::Utils.escape_html(hashed_content)
+        kw2hash.each do |(keyword, hash)|
+            if redis.exists "url#{keyword}"
+               keyword_url = redis.get "url#{keyword}"
+            else 
+               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+               redis.set "url#{keyword}",keyword_url
+            end 
+            if redis .exists "anchor#{keyword}"
+               anchor = redis.get "anchor#{keyword}" 
+            else
+                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+                redis.set "anchor#{keyword}",anchor
+            end
+            escaped_content.gsub!(hash, anchor)
 
 #          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
 #          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
 #          escaped_content.gsub!(hash, anchor)
-#        end
-         hashed_content.gsub(/\n/, "<br />\n")
-#        escaped_content.gsub(/\n/, "<br />\n")
+        end
+        escaped_content.gsub(/\n/, "<br />\n")
       end
 
       def uri_escape(str)
@@ -186,21 +147,13 @@ module Isuda
       end
 
       def load_stars(keyword)
-          stars = db1.xquery(%| select * from star where keyword = ? |,keyword).to_a
-          body = JSON.generate(stars: stars)
-          stars_res = JSON.parse(body)
-          stars_res['stars']
+        isutar_url = URI(settings.isutar_origin)
+        isutar_url.path = '/stars'
+        isutar_url.query = URI.encode_www_form(keyword: keyword)
+        body = Net::HTTP.get(isutar_url)
+        stars_res = JSON.parse(body)
+        stars_res['stars']
       end
-
-# isutarstar
-#      def load_stars(keyword)
-#        isutar_url = URI(settings.isutar_origin)
-#        isutar_url.path = '/stars'
-#        isutar_url.query = URI.encode_www_form(keyword: keyword)
-#        body = Net::HTTP.get(isutar_url)
-#        stars_res = JSON.parse(body)
-#        stars_res['stars']
-#      end
 
       def redirect_found(path)
         redirect(path, 302)
@@ -209,10 +162,9 @@ module Isuda
 
     get '/initialize' do
       db.xquery(%| DELETE FROM entry WHERE id > 7101 |)
-      db1.xquery('TRUNCATE star')
-#      isutar_initialize_url = URI(settings.isutar_origin)
-#      isutar_initialize_url.path = '/initialize'
-#      Net::HTTP.get_response(isutar_initialize_url)
+      isutar_initialize_url = URI(settings.isutar_origin)
+      isutar_initialize_url.path = '/initialize'
+      Net::HTTP.get_response(isutar_initialize_url)
 
       content_type :json
       JSON.generate(result: 'ok')
@@ -383,7 +335,7 @@ module Isuda
          entry[:html] = redis.get "content#{entry[:id]}"
       else 
          entry[:html] = htmlify(entry[:description])
-         redis.set "content#{entry[:id]}",entry[:html]
+         redis.set "content#{entry[:id]}"
       end
 
       locals = {
@@ -415,29 +367,5 @@ module Isuda
       end
       redirect_found '/'
     end
-
-    #add isutar
-    get '/stars' do
-        keyword = params[:keyword] || ''
-        stars = db1.xquery(%| select * from star where keyword = ? |,keyword).to_a
-        content_type :json
-        JSON.generate(stars: stars)
-    end
-
-    post '/stars' do
-        keyword = params[:keyword] || ''
-#        isuda_keyword_url = URI(settings.isuda_origin)
-#        isuda_keywrod_url.path = '/keyword/%s' % [Rack::Utils.escape_path(keyword)]
-#        res = NET::HTTP.get_response(isuda_keyword_url)
-#        halt(404) unless Net::HTTPSuccess === res
-
-        user_name = params[:user]
-        db1.xquery(%|
-          INSERT INTO star (keyword, user_name, created_at)VALUES (?, ?, NOW())|, keyword, user_name)
-        content_type :json
-        JSON.generate(result: 'ok')
-    end
   end
 end
-
-
