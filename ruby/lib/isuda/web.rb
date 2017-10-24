@@ -12,13 +12,13 @@ require 'tilt/erubis'
 # add redis
 require 'redis'
 require 'hiredis'
-#require 'rack-lineprof'
+require 'rack-lineprof'
 
 # redisコネクション作
 
 module Isuda
   class Web < ::Sinatra::Base
-#    use Rack::Lineprof
+    use Rack::Lineprof
     enable :protection
     enable :sessions
 
@@ -105,7 +105,8 @@ module Isuda
            pattern = keywords.map {|k| Regexp.escape(k[:keyword]) }.join('|')
            redis.set "patern", pattern
         end
-        kw2hash = {}
+#        kw2hash = {}
+#        escaped_content = Rack::Utils.escape_html(content)
         hashed_content = content.gsub(/(#{pattern})/) {|m|
           matched_keyword = $1
           if redis.exists "hash#{matched_keyword}" then
@@ -114,32 +115,46 @@ module Isuda
               redis.set "hash#{matched_keyword}", "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}"
               hash = redis.get "hash#{matched_keyword}"
           end
-          kw2hash[matched_keyword] = hash
+          if redis.exists "url#{matched_keyword}"
+             keyword_url = redis.get "url#{matched_keyword}"
+          else 
+             keyword_url =url("/keyword/#{Rack::Utils.escape_path(matched_keyword)}")
+             redis.set "url#{matched_keyword}",keyword_url
+          end 
+          if redis .exists "anchor#{matched_keyword}"
+             anchor = redis.get "anchor#{matched_keyword}" 
+          else
+             anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(matched_keyword)]
+             redis.set "anchor#{matched_keyword}",anchor
+          end
+          anchor
+#          kw2hash[matched_keyword] = hash
 #          "isuda_#{Digest::SHA1.hexdigest(matched_keyword)}".tap do |hash|
 #            kw2hash[matched_keyword] = hash
 #          end
         }
-        escaped_content = Rack::Utils.escape_html(hashed_content)
-        kw2hash.each do |(keyword, hash)|
-            if redis.exists "url#{keyword}"
-               keyword_url = redis.get "url#{keyword}"
-            else 
-               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
-               redis.set "url#{keyword}",keyword_url
-            end 
-            if redis .exists "anchor#{keyword}"
-               anchor = redis.get "anchor#{keyword}" 
-            else
-                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
-                redis.set "anchor#{keyword}",anchor
-            end
-            escaped_content.gsub!(hash, anchor)
+#        escaped_content = Rack::Utils.escape_html(hashed_content)
+#        kw2hash.each do |(keyword, hash)|
+#            if redis.exists "url#{keyword}"
+#               keyword_url = redis.get "url#{keyword}"
+#            else 
+#               keyword_url =url("/keyword/#{Rack::Utils.escape_path(keyword)}")
+#               redis.set "url#{keyword}",keyword_url
+#            end 
+#            if redis .exists "anchor#{keyword}"
+#               anchor = redis.get "anchor#{keyword}" 
+#            else
+#                anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
+#                redis.set "anchor#{keyword}",anchor
+#            end
+#            escaped_content.gsub!(hash, anchor)
 
 #          keyword_url = url("/keyword/#{Rack::Utils.escape_path(keyword)}")
 #          anchor = '<a href="%s">%s</a>' % [keyword_url, Rack::Utils.escape_html(keyword)]
 #          escaped_content.gsub!(hash, anchor)
-        end
-        escaped_content.gsub(/\n/, "<br />\n")
+#        end
+         hashed_content.gsub(/\n/, "<br />\n")
+#        escaped_content.gsub(/\n/, "<br />\n")
       end
 
       def uri_escape(str)
@@ -335,7 +350,7 @@ module Isuda
          entry[:html] = redis.get "content#{entry[:id]}"
       else 
          entry[:html] = htmlify(entry[:description])
-         redis.set "content#{entry[:id]}"
+         redis.set "content#{entry[:id]}",entry[:html]
       end
 
       locals = {
